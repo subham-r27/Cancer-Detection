@@ -5,7 +5,7 @@ import { Upload, Cpu, ScanSearch, Activity } from "lucide-react";
 const svgBg =
   "url(\"data:image/svg+xml,%3Csvg width='16' height='16' viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 0h16v2h-6v6h6v8H8v-6H2v6H0V0zm4 4h2v2H4V4zm8 8h2v2h-2v-2zm-8 0h2v2H4v-2zm8-8h2v2h-2V4z' fill='%23390986' fill-opacity='0.58' fill-rule='evenodd'/%3E%3C/svg%3E\")";
 
-const Stage2Upload = ({ onFileChange, uploadedFile, processing }) => {
+const Stage2Upload = ({ onFileChange, uploadedFile, processing, fetchError }) => {
   return (
     <section
       className="relative h-screen w-full flex flex-col items-center justify-center overflow-hidden text-white"
@@ -60,11 +60,18 @@ const Stage2Upload = ({ onFileChange, uploadedFile, processing }) => {
         </div>
 
         {/* Selected file info */}
-        {uploadedFile && !processing && (
+        {uploadedFile && !processing && !fetchError && (
           <div className="absolute -bottom-12 left-0 right-0 text-center">
             <p className="text-[10px] uppercase tracking-widest text-slate-500">
               Ready: <span className="text-white font-bold">{uploadedFile.name}</span>
             </p>
+          </div>
+        )}
+
+        {/* Backend error (e.g. 422) */}
+        {fetchError && (
+          <div className="absolute -bottom-24 left-0 right-0 text-center px-4">
+            <p className="text-xs text-red-400 font-medium max-w-md mx-auto">{fetchError}</p>
           </div>
         )}
 

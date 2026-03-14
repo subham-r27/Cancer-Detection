@@ -13,7 +13,7 @@ const Stage8Report = ({ data, processedImages = [], heatmapUrl = null, onBack })
         return `REP-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
     }, []);
 
-    const volume = (data.detectedDiameter * 1.4).toFixed(1);
+    const volume = ((data.detectedDiameter ?? 0) * 1.4).toFixed(1);
 
     // Prevent generation if name is missing
     const canGenerate = patientName.trim().length > 0;
@@ -79,13 +79,13 @@ const Stage8Report = ({ data, processedImages = [], heatmapUrl = null, onBack })
 
                         <div className="bg-black/80 border border-[#e56607]/30 p-6">
                             <p className="text-[10px] uppercase tracking-[0.2em] text-[#e56607] mb-1">Measurements</p>
-                            <div className="text-xl font-bold">{data.detectedDiameter.toFixed(1)}<span className="text-[10px] ml-1 opacity-50">MM Ø</span></div>
+                            <div className="text-xl font-bold">{(data.detectedDiameter ?? 0).toFixed(1)}<span className="text-[10px] ml-1 opacity-50">MM Ø</span></div>
                             <div className="text-sm font-bold text-slate-400">{volume}<span className="text-[10px] ml-1 opacity-50">CM³ VOL</span></div>
                         </div>
 
                         <div className="bg-black/80 border border-[#e56607]/30 p-6">
                             <p className="text-[10px] uppercase tracking-[0.2em] text-[#e56607] mb-1">Density</p>
-                            <div className="text-xl font-bold">{data.pixelCount.toLocaleString()}<span className="text-[10px] ml-1 opacity-50">PX</span></div>
+                            <div className="text-xl font-bold">{(data.pixelCount ?? 0).toLocaleString()}<span className="text-[10px] ml-1 opacity-50">PX</span></div>
                         </div>
                     </div>
 
@@ -127,10 +127,13 @@ const Stage8Report = ({ data, processedImages = [], heatmapUrl = null, onBack })
                     <div className="flex flex-col gap-4">
                         <div className="bg-[#e56607]/10 border border-[#e56607]/30 p-6 flex flex-col items-center justify-center text-center relative">
                             <p className="text-[9px] uppercase tracking-[0.3em] text-[#e56607] font-bold mb-2">Risk Assessment</p>
-                            <div className="text-5xl font-black text-[#e56607] leading-none mb-2">{data.severityScore}</div>
-                            <div className="px-4 py-1 bg-[#e56607] text-black text-[8px] font-black uppercase tracking-[0.2em]">
+                            <div className="text-5xl font-black text-[#e56607] leading-none mb-2">{data.severityScore ?? "—"}</div>
+                            <div className="px-4 py-1 bg-[#e56607] text-black text-[8px] font-black uppercase tracking-[0.2em] mb-2">
                                 {data.severityTag} RISK
                             </div>
+                            {data.stage != null && data.stage !== "—" && (
+                                <p className="text-[9px] uppercase tracking-widest text-white/90">Stage: {data.stage}</p>
+                            )}
                         </div>
 
                         <div className="bg-black/80 border border-[#e56607]/30 p-4 flex flex-col items-center relative">

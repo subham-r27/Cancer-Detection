@@ -5,7 +5,7 @@ import { motion } from 'framer-motion';
 
 const svgBg = "url(\"data:image/svg+xml,%3Csvg width='16' height='16' viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 0h16v2h-6v6h6v8H8v-6H2v6H0V0zm4 4h2v2H4V4zm8 8h2v2h-2v-2zm-8 0h2v2H4v-2zm8-8h2v2h-2V4z' fill='%23a3b307' fill-opacity='0.55' fill-rule='evenodd'/%3E%3C/svg%3E\")";
 
-const Stage5Severity = ({ onNext, score = 0, tag = "LOW" }) => {
+const Stage5Severity = ({ onNext, score = 0, tag = "—", stage = "—" }) => {
   const scope = useRef(null);
   const scoreRef = useRef(null);
 
@@ -96,6 +96,10 @@ const Stage5Severity = ({ onNext, score = 0, tag = "LOW" }) => {
             </div>
           </div>
 
+          <div className="flex flex-col gap-2">
+            <p className="text-[10px] uppercase tracking-[0.3em] text-white/70">Diagnosis Stage</p>
+            <p className="text-xl font-bold text-[#c0d111]">{stage}</p>
+          </div>
           <div className="flex flex-col gap-6">
             <p className="text-white text-xs font-medium uppercase tracking-[0.2em] max-w-md border-l-2 border-[#c0d111] pl-4 py-1 leading-relaxed">
               Final diagnostic computation complete. Severity score is determined by morphological growth patterns and tissue density variance.

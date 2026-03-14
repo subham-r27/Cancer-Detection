@@ -1,3 +1,4 @@
+import io
 from pathlib import Path
 from typing import Optional
 
@@ -7,8 +8,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
 import tensorflow as tf
 
+# Custom layers used by breast_model.keras (EncoderBlock, DecoderBlock, AttentionGate)
+from custom_layers import AttentionGate, DecoderBlock, EncoderBlock  # noqa: E402, F401
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+
+BACKEND_DIR = Path(__file__).resolve().parent
+MODELS_DIR = BACKEND_DIR / "models"
 
 
 app = FastAPI(title="Cancer Detection Backend", version="1.0.0")
@@ -54,7 +59,7 @@ def bce_dice_loss(y_true, y_pred):
 def _load_lung_model() -> tf.keras.Model:
     global _lung_model
     if _lung_model is None:
-        model_path = BASE_DIR / "lung-segmentation" / "trained-models" / "tumor_segmentation.keras"
+        model_path = MODELS_DIR / "tumor_segmentation.keras"
         if not model_path.exists():
             raise FileNotFoundError(f"Lung segmentation model not found at {model_path}")
         _lung_model = tf.keras.models.load_model(
@@ -71,7 +76,7 @@ def _load_lung_model() -> tf.keras.Model:
 def _load_oral_model() -> tf.keras.Model:
     global _oral_model
     if _oral_model is None:
-        model_path = BASE_DIR / "models" / "oral_cancer_model.h5"
+        model_path = MODELS_DIR / "oral_cancer_model.h5"
         if not model_path.exists():
             raise FileNotFoundError(f"Oral cancer model not found at {model_path}")
         _oral_model = tf.keras.models.load_model(model_path, compile=False)
@@ -81,30 +86,74 @@ def _load_oral_model() -> tf.keras.Model:
 def _load_breast_model() -> tf.keras.Model:
     global _breast_model
     if _breast_model is None:
-        model_path = BASE_DIR / "breast_cancer_model" / "attention_unet_model.keras"
+        model_path = MODELS_DIR / "breast_model.keras"
         if not model_path.exists():
             raise FileNotFoundError(f"Breast cancer model not found at {model_path}")
-        _breast_model = tf.keras.models.load_model(model_path, compile=False)
+        custom_objects = {
+            "EncoderBlock": EncoderBlock,
+            "DecoderBlock": DecoderBlock,
+            "AttentionGate": AttentionGate,
+            "Custom>EncoderBlock": EncoderBlock,
+            "Custom>DecoderBlock": DecoderBlock,
+            "Custom>AttentionGate": AttentionGate,
+        }
+        _breast_model = tf.keras.models.load_model(
+            model_path, compile=False, custom_objects=custom_objects
+        )
     return _breast_model
 
 
 def _load_prostate_model() -> tf.keras.Model:
     global _prostate_model
     if _prostate_model is None:
-        # Expect a trained model saved via callbacks in prostate-analysis
-        model_path = BASE_DIR / "prostate-analysis" / "best_prostate_model.h5"
+        model_path = MODELS_DIR / "best_prostate_model.h5"
         if not model_path.exists():
             raise FileNotFoundError(f"Prostate model not found at {model_path}")
         _prostate_model = tf.keras.models.load_model(model_path, compile=False)
     return _prostate_model
 
 
-def _read_image_to_array(upload: UploadFile, target_size: Optional[tuple[int, int]] = None) -> np.ndarray:
-    image = Image.open(upload.file).convert("RGB")
+def _get_model_input_size(model: tf.keras.Model, default: tuple[int, int] = (224, 224)) -> tuple[int, int]:
+    """Get (height, width) from model input shape; use default if dynamic."""
+    try:
+        shape = model.input_shape
+        if isinstance(shape, list):
+            shape = shape[0]
+        h, w = shape[1], shape[2]
+        if h is None or w is None:
+            return default
+        return (int(h), int(w))
+    except (TypeError, IndexError):
+        return default
+
+
+def _read_image_to_array(image_bytes: bytes, target_size: Optional[tuple[int, int]] = None) -> np.ndarray:
+    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
     if target_size is not None:
-        image = image.resize(target_size)
+        image = image.resize((target_size[1], target_size[0]))  # PIL uses (width, height)
     arr = np.array(image).astype("float32") / 255.0
     return np.expand_dims(arr, axis=0)
+
+
+def _stats_from_prediction(pred: np.ndarray, organ: str) -> dict:
+    """Route prediction to segmentation stats or classifier-based stats."""
+    pred = np.asarray(pred)
+    # Classifier: (1, n_classes) or (1,) or (1, 1)
+    if pred.ndim <= 2 and pred.size <= 32:
+        probs = pred.flatten()
+        if len(probs) == 1:
+            cancer_prob = float(probs[0])
+        else:
+            cancer_prob = float(probs[-1])  # assume last is positive class
+        severity_score = min(100.0, cancer_prob * 100.0)
+        return {
+            "tumor_pixels": 0,
+            "tumor_percentage": 0.0,
+            "diameter_mm": 0.0,
+            "coverage_area_cm2": 0.0,
+            "severity_score": severity_score,
+        }
+    return _compute_tumor_stats_from_mask(pred)
 
 
 def _compute_tumor_stats_from_mask(mask: np.ndarray) -> dict:
@@ -176,47 +225,49 @@ def health() -> dict:
 
 @app.post("/analyze")
 async def analyze(
-    organ: str = Form(..., description="Organ name: Lung, Prostate, Oral, Breast"),
-    file: UploadFile = File(...),
+    file: UploadFile = File(..., description="Image file"),
+    organ: str = Form("Lung", description="Organ name: Lung, Prostate, Oral, Breast"),
 ) -> dict:
-    organ_normalized = organ.strip().lower()
+    organ_normalized = (organ or "Lung").strip().lower()
+
+    try:
+        body = await file.read()
+        if not body:
+            raise HTTPException(status_code=400, detail="Empty file")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to read file: {e}")
 
     try:
         if organ_normalized == "lung":
             model = _load_lung_model()
-            # Assume lung model expects 512x512 RGB
-            img = _read_image_to_array(file, target_size=(512, 512))
+            img = _read_image_to_array(body, target_size=(512, 512))
             pred = model.predict(img, verbose=0)
-            stats = _compute_tumor_stats_from_mask(pred)
+            stats = _stats_from_prediction(pred, "lung")
 
         elif organ_normalized == "oral":
             model = _load_oral_model()
-            # Use model input shape if available
-            h, w = model.input_shape[1], model.input_shape[2]
-            img = _read_image_to_array(file, target_size=(w, h))
+            h, w = _get_model_input_size(model)
+            img = _read_image_to_array(body, target_size=(h, w))
             pred = model.predict(img, verbose=0)
-            stats = _compute_tumor_stats_from_mask(pred)
+            stats = _stats_from_prediction(pred, "oral")
 
         elif organ_normalized == "breast":
             model = _load_breast_model()
-            h, w = model.input_shape[1], model.input_shape[2]
-            img = _read_image_to_array(file, target_size=(w, h))
+            h, w = _get_model_input_size(model)
+            img = _read_image_to_array(body, target_size=(h, w))
             pred = model.predict(img, verbose=0)
-            stats = _compute_tumor_stats_from_mask(pred)
+            stats = _stats_from_prediction(pred, "breast")
 
         elif organ_normalized == "prostate":
             model = _load_prostate_model()
-            # Prostate model is a classifier; we use probability as severity
-            h, w = model.input_shape[1], model.input_shape[2]
-            img = _read_image_to_array(file, target_size=(w, h))
+            h, w = _get_model_input_size(model)
+            img = _read_image_to_array(body, target_size=(h, w))
             probs = model.predict(img, verbose=0)[0]
             if probs.size == 1:
                 cancer_prob = float(probs[0])
             else:
-                # assume index 1 is "cancer" class
-                cancer_prob = float(probs[1])
-
-            severity_score = cancer_prob * 100.0
+                cancer_prob = float(probs[-1])
+            severity_score = min(100.0, cancer_prob * 100.0)
             stats = {
                 "tumor_pixels": 0,
                 "tumor_percentage": 0.0,
@@ -231,8 +282,8 @@ async def analyze(
         raise
     except FileNotFoundError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:  # pragma: no cover - defensive
-        raise HTTPException(status_code=500, detail=f"Model inference error: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Model inference error: {type(e).__name__}: {e}")
 
     severity_tag = _severity_tag_from_score(stats["severity_score"])
     stage = _stage_from_stats(organ_normalized, stats)

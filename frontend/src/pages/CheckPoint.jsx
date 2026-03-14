@@ -25,17 +25,13 @@ const CheckPoint = () => {
   const [uploadedFile, setUploadedFile] = useState(null);
   const [processing, setProcessing] = useState(false);
 
-  const [detectedDiameter, setDetectedDiameter] = useState(14);
-  const [pixelCount, setPixelCount] = useState(48213);
-  const [coverageArea, setCoverageArea] = useState(7.4);
-  const [severityScore, setSeverityScore] = useState(72);
-  const [diagnosisStage, setDiagnosisStage] = useState("Normal");
-
-  const severityTag = useMemo(() => {
-    if (severityScore >= 70) return "High";
-    if (severityScore >= 40) return "Medium";
-    return "Low";
-  }, [severityScore]);
+  const [detectedDiameter, setDetectedDiameter] = useState(0);
+  const [pixelCount, setPixelCount] = useState(0);
+  const [coverageArea, setCoverageArea] = useState(0);
+  const [severityScore, setSeverityScore] = useState(0);
+  const [diagnosisStage, setDiagnosisStage] = useState("—");
+  const [severityTag, setSeverityTag] = useState("—");
+  const [fetchError, setFetchError] = useState(null);
 
   const handleNext = () => {
     setCurrentStage((prev) => {
@@ -51,50 +47,43 @@ const CheckPoint = () => {
 
     setUploadedFile(file);
     setProcessing(true);
+    setFetchError(null);
+
+    const formData = new FormData();
+    formData.append("organ", selectedOrgan || "Lung");
+    formData.append("file", file, file.name);
 
     try {
-      const formData = new FormData();
-      if (selectedOrgan) {
-        formData.append("organ", selectedOrgan);
-      } else {
-        formData.append("organ", "Lung");
-      }
-      formData.append("file", file);
-
       const response = await fetch("http://localhost:8000/analyze", {
         method: "POST",
         body: formData,
       });
 
+      const data = await response.json().catch(() => ({}));
+
       if (!response.ok) {
-        throw new Error("Backend error");
+        let msg = "Request failed";
+        if (data.detail) {
+          msg = Array.isArray(data.detail) ? data.detail.map((d) => d.msg || d.loc?.join(".")).join(", ") : String(data.detail);
+        } else {
+          msg = response.statusText || msg;
+        }
+        setFetchError(msg);
+        return;
       }
 
-      const data = await response.json();
-
-      setDetectedDiameter(
-        typeof data.diameter_mm === "number" ? data.diameter_mm : 13.8
-      );
-      setPixelCount(
-        typeof data.tumor_pixels === "number" ? data.tumor_pixels : 51234
-      );
-      setCoverageArea(
-        typeof data.coverage_area_cm2 === "number"
-          ? data.coverage_area_cm2
-          : 6.9
-      );
-      setSeverityScore(
-        typeof data.severity_score === "number" ? data.severity_score : 68
-      );
-      setDiagnosisStage(
-        typeof data.stage === "string" ? data.stage : "Normal"
-      );
+      setDetectedDiameter(typeof data.diameter_mm === "number" ? data.diameter_mm : 0);
+      setPixelCount(typeof data.tumor_pixels === "number" ? data.tumor_pixels : 0);
+      setCoverageArea(typeof data.coverage_area_cm2 === "number" ? data.coverage_area_cm2 : 0);
+      setSeverityScore(typeof data.severity_score === "number" ? data.severity_score : 0);
+      setDiagnosisStage(typeof data.stage === "string" ? data.stage : "—");
+      setSeverityTag(typeof data.severity_tag === "string" ? data.severity_tag : "—");
 
       setFurthestStage((f) => Math.max(f, 3));
       setCurrentStage(3);
     } catch (err) {
       console.error("Error calling backend:", err);
-      setProcessing(false);
+      setFetchError(err.message || "Network error");
     } finally {
       setProcessing(false);
     }
@@ -119,6 +108,7 @@ const CheckPoint = () => {
             uploadedFile={uploadedFile}
             processing={processing}
             onFileChange={handleFileChange}
+            fetchError={fetchError}
           />
         );
 
@@ -145,7 +135,8 @@ const CheckPoint = () => {
           <Stage5Severity
             {...commonProps}
             score={severityScore}
-            tag={diagnosisStage}
+            tag={severityTag}
+            stage={diagnosisStage}
           />
         );
 
@@ -166,6 +157,7 @@ const CheckPoint = () => {
               coverageArea,
               severityScore,
               severityTag,
+              stage: diagnosisStage,
             }}
           />
         );
