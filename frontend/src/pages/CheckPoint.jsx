@@ -29,6 +29,7 @@ const CheckPoint = () => {
   const [pixelCount, setPixelCount] = useState(48213);
   const [coverageArea, setCoverageArea] = useState(7.4);
   const [severityScore, setSeverityScore] = useState(72);
+  const [diagnosisStage, setDiagnosisStage] = useState("Normal");
 
   const severityTag = useMemo(() => {
     if (severityScore >= 70) return "High";
@@ -44,23 +45,59 @@ const CheckPoint = () => {
     });
   };
 
-  const handleFileChange = (e) => {
+  const handleFileChange = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setUploadedFile(file);
     setProcessing(true);
 
-    setTimeout(() => {
-      setProcessing(false);
-      setDetectedDiameter(13.8);
-      setPixelCount(51234);
-      setCoverageArea(6.9);
-      setSeverityScore(68);
+    try {
+      const formData = new FormData();
+      if (selectedOrgan) {
+        formData.append("organ", selectedOrgan);
+      } else {
+        formData.append("organ", "Lung");
+      }
+      formData.append("file", file);
+
+      const response = await fetch("http://localhost:8000/analyze", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error("Backend error");
+      }
+
+      const data = await response.json();
+
+      setDetectedDiameter(
+        typeof data.diameter_mm === "number" ? data.diameter_mm : 13.8
+      );
+      setPixelCount(
+        typeof data.tumor_pixels === "number" ? data.tumor_pixels : 51234
+      );
+      setCoverageArea(
+        typeof data.coverage_area_cm2 === "number"
+          ? data.coverage_area_cm2
+          : 6.9
+      );
+      setSeverityScore(
+        typeof data.severity_score === "number" ? data.severity_score : 68
+      );
+      setDiagnosisStage(
+        typeof data.stage === "string" ? data.stage : "Normal"
+      );
 
       setFurthestStage((f) => Math.max(f, 3));
       setCurrentStage(3);
-    }, 1400);
+    } catch (err) {
+      console.error("Error calling backend:", err);
+      setProcessing(false);
+    } finally {
+      setProcessing(false);
+    }
   };
 
   const renderStageContent = () => {
@@ -108,7 +145,7 @@ const CheckPoint = () => {
           <Stage5Severity
             {...commonProps}
             score={severityScore}
-            tag={severityTag}
+            tag={diagnosisStage}
           />
         );
 
